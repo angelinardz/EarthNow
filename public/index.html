@@ -89,20 +89,30 @@
             myGlobe.controls().autoRotate = false;
         });
 
-        // --- MOCK NEWS API FUNCTION ---
-        function fetchNews(name, code) {
-            console.log(`Ready to trigger endpoint: https://newsapi.org/v2/top-headlines?country=${code}`);
-            
-            // Example layout placeholder showing where your JSON data will map:
-            setTimeout(() => {
-                document.getElementById('country-info').innerText = `Latest headlines from ${name}:`;
-                document.getElementById('news-feed').innerHTML = `
-                    <ul style="padding-left: 15px; margin-top: 10px; font-size:0.9rem; line-height: 1.4;">
-                        <li>Breaking news placeholder for ${code}</li>
-                        <li>Local policy shifts update</li>
-                    </ul>
-                `;
-            }, 500); 
+        // --- NEWS AGENT (Cloudflare Worker + Durable Object) ---
+        async function fetchNews(name, code) {
+            const instanceName = (code || name).toLowerCase();
+            const endpoint = `/agents/news-agent/${encodeURIComponent(instanceName)}?name=${encodeURIComponent(name)}&code=${encodeURIComponent(code || "")}`;
+
+            try {
+                const res = await fetch(endpoint);
+                if (!res.ok) throw new Error(`Agent request failed: ${res.status}`);
+                const data = await res.json();
+
+                document.getElementById('country-info').innerText = data.briefing;
+
+                const headlinesHtml = (data.headlines || [])
+                    .map(h => `<li><a href="${h.url}" target="_blank" rel="noopener" style="color:#38bdf8;">${h.title}</a> <span style="color:#64748b;">— ${h.source}</span></li>`)
+                    .join('');
+
+                document.getElementById('news-feed').innerHTML = headlinesHtml
+                    ? `<ul style="padding-left: 15px; margin-top: 10px; font-size:0.9rem; line-height: 1.4;">${headlinesHtml}</ul>`
+                    : '';
+            } catch (err) {
+                console.error(err);
+                document.getElementById('country-info').innerText = `Couldn't load news for ${name}. Try again in a moment.`;
+                document.getElementById('news-feed').innerHTML = '';
+            }
         }
     </script>
 </body>
