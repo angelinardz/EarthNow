@@ -28,7 +28,7 @@
     </style>
 
     <!-- Load Globe.gl (Includes Three.js inside it) -->
-    <script src="https://unpkg.com/globe.gl"></script>
+    <script src="/vendor/globe.gl.js"></script>
 </head>
 <body>
 
@@ -48,12 +48,11 @@
         const myGlobe = Globe()(element)
             // 1. Setup appearance
             .backgroundColor('#0b0f19')
-            .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-night.jpg')
-            .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
-            
+            .globeImageUrl('/vendor/earth-night.jpg')
+            .bumpImageUrl('/vendor/earth-topology.png')
+
             // 2. Load and render country polygons (GeoJSON)
-            // This public dataset gives us the boundary shapes and ISO codes
-            .polygonsData('https://unpkg.com/three-globe/example/datasets/ne_110m_admin_0_countries.geojson')
+            // globe.gl needs the parsed features array, not a URL — fetched below
             .polygonAltitude(0.006) // Raises the countries slightly above the ocean floor
             .polygonCapColor(() => 'rgba(56, 189, 248, 0.15)') // Default country tint
             .polygonSideColor(() => 'rgba(255, 255, 255, 0.05)')
@@ -88,6 +87,12 @@
         myGlobe.controls().addEventListener('start', () => {
             myGlobe.controls().autoRotate = false;
         });
+
+        // Fetch and parse the country boundaries, then hand the features
+        // array to globe.gl (it does not auto-fetch string URLs)
+        fetch('/vendor/countries.geojson')
+            .then(res => res.json())
+            .then(countries => myGlobe.polygonsData(countries.features));
 
         // --- NEWS AGENT (Cloudflare Worker + Durable Object) ---
         async function fetchNews(name, code) {
