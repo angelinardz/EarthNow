@@ -83,6 +83,12 @@
         myGlobe.controls().autoRotateSpeed = 0.3;
         myGlobe.pointOfView({ lat: 20, lng: 0, altitude: 2.0 });
 
+        // Keep the canvas filling the viewport (globe.gl only sizes to the
+        // container once, at init — it doesn't track window resizes on its own)
+        window.addEventListener('resize', () => {
+            myGlobe.width(window.innerWidth).height(window.innerHeight);
+        });
+
         // Pause auto-rotation when the user manually drags the globe
         myGlobe.controls().addEventListener('start', () => {
             myGlobe.controls().autoRotate = false;
