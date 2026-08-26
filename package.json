@@ -1,7 +1,7 @@
 {
   "name": "earthnow",
   "version": "1.0.0",
-  "description": "Interactive 3D globe with an AI news agent, built on Cloudflare Workers + Agents SDK",
+  "description": "An interactive 3D globe where clicking a country returns an AI-generated briefing of its current news, powered by Cloudflare Workers, Durable Objects and Workers AI",
   "private": true,
   "type": "module",
   "scripts": {
