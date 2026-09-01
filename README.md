@@ -1,4 +1,5 @@
 # EarthNow
+https://earthnow.angelinardz06.workers.dev/
 
 An interactive 3D globe where clicking any country returns an AI-generated
 briefing of what's happening there right now.
