@@ -7,6 +7,12 @@ interface Article {
   url: string;
 }
 
+interface NewsPayload {
+  country: string;
+  headlines: { title: string; source: string; url: string }[];
+  briefing: string;
+}
+
 // Google News publishes a country "edition" for these codes. For anything
 // else we fall back to a keyword search on the country's name.
 const GOOGLE_NEWS_EDITIONS = new Set([
@@ -18,7 +24,23 @@ const GOOGLE_NEWS_EDITIONS = new Set([
   "za",
 ]);
 
+// How long to serve a cached result for a country before re-fetching.
+// Google News RSS content doesn't change fast enough to need every click
+// to hit the network, and this also takes pressure off the rate limit.
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Transient upstream statuses worth retrying — a 503 from Google News RSS
+// is usually a momentary rate-limit/overload response, not a permanent failure.
+const RETRYABLE_STATUSES = new Set([502, 503, 429]);
+
 export class NewsAgent extends Agent<Env> {
+  // In-memory per-instance cache. Since each country gets its own Agent
+  // instance (keyed by country code), this naturally caches per-country.
+  // NOTE: this resets if the Durable Object is evicted/restarted — it's a
+  // performance/rate-limit cushion, not durable storage. If you want it to
+  // survive evictions, swap this for the Agent SDK's persistent storage.
+  private cache: { payload: NewsPayload; cachedAt: number } | null = null;
+
   async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const countryName = url.searchParams.get("name");
@@ -28,28 +50,35 @@ export class NewsAgent extends Agent<Env> {
       return Response.json({ error: "Missing ?name= query param" }, { status: 400 });
     }
 
+    if (this.cache && Date.now() - this.cache.cachedAt < CACHE_TTL_MS) {
+      return Response.json(this.cache.payload);
+    }
+
     try {
       const articles = await this.fetchHeadlines(countryName, countryCode);
 
+      let payload: NewsPayload;
       if (articles.length === 0) {
-        return Response.json({
+        payload = {
           country: countryName,
           headlines: [],
           briefing: `No recent news articles were found for ${countryName}.`,
-        });
+        };
+      } else {
+        const briefing = await this.summarize(countryName, articles);
+        payload = {
+          country: countryName,
+          headlines: articles.slice(0, 5).map((a) => ({
+            title: a.title,
+            source: a.source.name,
+            url: a.url,
+          })),
+          briefing,
+        };
       }
 
-      const briefing = await this.summarize(countryName, articles);
-
-      return Response.json({
-        country: countryName,
-        headlines: articles.slice(0, 5).map((a) => ({
-          title: a.title,
-          source: a.source.name,
-          url: a.url,
-        })),
-        briefing,
-      });
+      this.cache = { payload, cachedAt: Date.now() };
+      return Response.json(payload);
     } catch (err) {
       console.error("NewsAgent error:", err);
       return Response.json(
@@ -71,15 +100,36 @@ export class NewsAgent extends Agent<Env> {
       ? `https://news.google.com/rss?hl=en&gl=${region}&ceid=${region}:en`
       : `https://news.google.com/rss/search?q=${encodeURIComponent(countryName)}&hl=en&gl=US&ceid=US:en`;
 
-    const res = await fetch(endpoint, {
-      headers: { "User-Agent": "EarthNow/1.0 (Cloudflare Workers)" },
-    });
+    const res = await this.fetchWithRetry(endpoint);
+    return parseRssItems(await res.text()).slice(0, 8);
+  }
 
-    if (!res.ok) {
-      throw new Error(`Google News RSS request failed: ${res.status}`);
+  // Retries transient upstream failures (503/502/429) with exponential
+  // backoff before giving up. Non-transient errors (4xx other than 429)
+  // fail immediately since retrying won't help.
+  private async fetchWithRetry(
+    endpoint: string,
+    maxRetries = 2,
+    baseDelayMs = 300,
+  ): Promise<Response> {
+    let lastStatus: number | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const res = await fetch(endpoint, {
+        headers: { "User-Agent": "EarthNow/1.0 (Cloudflare Workers)" },
+      });
+
+      if (res.ok) return res;
+
+      lastStatus = res.status;
+      const isRetryable = RETRYABLE_STATUSES.has(res.status);
+      if (!isRetryable || attempt === maxRetries) break;
+
+      const delay = baseDelayMs * 2 ** attempt; // 300ms, 600ms, ...
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
-    return parseRssItems(await res.text()).slice(0, 8);
+    throw new Error(`Google News RSS request failed: ${lastStatus}`);
   }
 
   private async summarize(countryName: string, articles: Article[]): Promise<string> {
