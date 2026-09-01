@@ -107,6 +107,7 @@ export class NewsAgent extends Agent<Env> {
   // Retries transient upstream failures (503/502/429) with exponential
   // backoff before giving up. Non-transient errors (4xx other than 429)
   // fail immediately since retrying won't help.
+  // Having news be saved for five minutes reduces amount of requests
   private async fetchWithRetry(
     endpoint: string,
     maxRetries = 2,
